@@ -32,7 +32,7 @@ class Fish {
     this.position = circleCenter;
     this.position = this.position.subtract(new Vector2D(0, circleRadius));
 
-    this.velocity = new Vector2D(30, 0);
+    this.velocity = new Vector2D(10, 0);
 
     this.state = "STUCK"; // elsewise "FREE"
 
@@ -60,6 +60,7 @@ class Fish {
 
     console.log("Energy " + this.calculateEnergy());
     console.log("State " + this.state);
+    console.log("Velocity " + this.velocity.x, this.velocity.y);
   }
 
   handleStuck(delta) {
@@ -82,7 +83,7 @@ class Fish {
       let dy = newPosition.y - this.position.y;
       let speedSq = this.velocity.magnitudeSquared() + 2 * gravity.y * dy;
       // (gravity.y is negative, dy positive when going up → speed decreases)
-      let newSpeed = Math.sqrt(Math.max(0, speedSq));
+      let newSpeed = Math.sqrt(Math.abs(speedSq)) * Math.sign(speedSq);
 
       this.position = newPosition;
       let newTangent = rotateVector.rotate(Math.PI / 2);
