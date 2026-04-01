@@ -10,6 +10,9 @@ function toScreenPosition(vec) {
   return new Vector2D(vec.x, 1000 - vec.y);
 }
 
+const airResistance = 0.01; // tweak strength
+const groundFriction = 0.5; // tweak strength
+const collisionElasticity = 1; // tweak bounciness
 const gravity = new Vector2D(0, -1); // tweak strength
 
 let circleCenter = new Vector2D(500, 500);
@@ -32,7 +35,7 @@ class Fish {
     this.position = circleCenter;
     this.position = this.position.subtract(new Vector2D(0, circleRadius));
 
-    this.velocity = new Vector2D(10, 0);
+    this.velocity = new Vector2D(35, 0);
 
     this.state = "STUCK"; // elsewise "FREE"
 
@@ -103,13 +106,13 @@ class Fish {
     let toCenterNew = newPosition.subtract(circleCenter);
 
     // check if already colliding
-    if (toCenter.magnitude() >= circleRadius + 1) {
+    if (toCenter.magnitude() >= circleRadius + 3) {
       console.log("EMERGENCY SNAP", toCenter.magnitude() - circleRadius);
       return 0;
     }
 
     // Check if collision with some margin
-    if (toCenterNew.magnitude() <= circleRadius + 1) {
+    if (toCenterNew.magnitude() < circleRadius) {
       return null;
     }
 
@@ -118,19 +121,15 @@ class Fish {
     let c = toCenter.magnitudeSquared() - circleRadius ** 2;
     let discriminant = b ** 2 - 4 * a * c;
     if (discriminant >= 0) {
-      console.log("Collision detected");
       let sqrtDisc = Math.sqrt(discriminant);
       let t1 = (-b - sqrtDisc) / (2 * a);
       let t2 = (-b + sqrtDisc) / (2 * a);
-
-      console.log(t1, t2);
 
       let aboveZero = [t1, t2].filter((t) => t >= 0);
       if (aboveZero.length === 0) {
         return null;
       }
       let collisionTime = Math.min(...aboveZero);
-      console.log(collisionTime, delta);
       if (collisionTime > delta) {
         return null;
       }
@@ -140,17 +139,19 @@ class Fish {
   }
 
   handleFree(delta) {
-    let originalVelocity = this.velocity;
+    // let originalVelocity = this.velocity;
     this.velocity = this.velocity.add(gravity.multiply(delta / 2));
 
     let collisionTime = this.detectCollision(delta);
     if (collisionTime !== null) {
-      this.velocity = originalVelocity;
-      this.velocity = this.velocity.add(gravity.multiply(collisionTime / 2));
-      // Finish the first half-step up to collision time only
+      // this.velocity = originalVelocity;
+      // this.velocity = this.velocity.add(gravity.multiply(collisionTime / 2));
+      // // Finish the first half-step up to collision time only
       this.position = this.position.add(this.velocity.multiply(collisionTime));
       // Apply the gravity owed for the first segment before handing off
-      this.velocity = this.velocity.add(gravity.multiply(collisionTime / 2));
+      this.velocity = this.velocity.add(
+        gravity.multiply(collisionTime - delta / 2),
+      );
       this.handleCollision(delta - collisionTime);
       return; // don't apply the trailing half-step
     }
@@ -162,24 +163,44 @@ class Fish {
   handleCollision(remainingDelta) {
     let toCenter = this.position.subtract(circleCenter);
     let normal = toCenter.normalize();
+    let tangent = normal.rotate(Math.PI / 2);
+
+    this.velocity = this.velocity.multiply(collisionElasticity);
+    let velocityWithGravity = this.velocity.add(
+      gravity.multiply(remainingDelta),
+    );
+
+    // 1. Move to collision point
+    this.position = circleCenter.add(normal.multiply(circleRadius));
 
     // Reflect velocity
     let normalSpeed = normal.multiply(this.velocity.dot(normal));
     let tangentVel = this.velocity.subtract(normalSpeed);
-    this.velocity = tangentVel.subtract(normalSpeed);
+
+    let velocityNormalized = this.velocity.normalize();
+
+    let minTangentSpeed = Math.sqrt(
+      circleRadius * Math.max(0, normal.y * -gravity.y),
+    );
 
     // Check if it should stick
-    let minSpeed = Math.sqrt(circleRadius * Math.max(0, normal.y * -gravity.y));
-    if (tangentVel.magnitude() >= minSpeed) {
+    if (
+      Math.abs(velocityNormalized.dot(normal)) < 0.7 &&
+      tangentVel.magnitude() > minTangentSpeed
+    ) {
       this.state = "STUCK";
       if (remainingDelta) {
         this.handleStuck(remainingDelta);
       }
     } else {
+      this.velocity = tangentVel.subtract(normalSpeed);
       this.state = "FREE";
       // Use remaining time to keep moving after bounce
       if (remainingDelta) {
-        this.handleFree(remainingDelta);
+        this.position = this.position.add(
+          this.velocity.multiply(remainingDelta),
+        );
+        this.velocity = this.velocity.add(gravity.multiply(remainingDelta));
       }
     }
   }
