@@ -4,8 +4,12 @@ export class Vector2D {
     this.y = y;
   }
 
+  magnitudeSquared() {
+    return this.x ** 2 + this.y ** 2;
+  }
+
   magnitude() {
-    return Math.sqrt(this.x ** 2 + this.y ** 2);
+    return Math.sqrt(this.magnitudeSquared());
   }
 
   normalize() {

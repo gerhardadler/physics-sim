@@ -6,14 +6,11 @@ const app = new PIXI.Application({
 });
 document.body.appendChild(app.view);
 
-function generateRandomPos(app, sprite_bounds) {
-  return new Vector2D(
-    Math.floor(Math.random() * (app.renderer.width - sprite_bounds.width)),
-    Math.floor(Math.random() * (app.renderer.height - sprite_bounds.height)),
-  );
+function toScreenPosition(vec) {
+  return new Vector2D(vec.x, 1000 - vec.y);
 }
 
-const gravity = new Vector2D(0, 1); // tweak strength
+const gravity = new Vector2D(0, -1); // tweak strength
 
 let circleCenter = new Vector2D(500, 500);
 let circleRadius = 300;
@@ -33,12 +30,11 @@ class Fish {
     this.sprite.width = 80;
     this.sprite.height = 80;
     this.position = circleCenter;
-    this.position = this.position.add(new Vector2D(0, circleRadius));
+    this.position = this.position.subtract(new Vector2D(0, circleRadius));
 
-    this.velocity = new Vector2D(35, 0);
-    this.acceleration = new Vector2D(0, 0);
+    this.velocity = new Vector2D(30, 0);
 
-    this.gravity = new Vector2D(0, 0.1);
+    this.state = "STUCK"; // elsewise "FREE"
 
     this.app.stage.addChild(this.sprite);
 
@@ -47,94 +43,150 @@ class Fish {
 
   // The tick function updates the fish
   tick(delta) {
-    // // 1. Apply gravity
     // this.velocity = this.velocity.add(gravity.multiply(delta));
 
-    // // 2. Move freely
-
-    // // 3. Check relation to circle
-    // let toCenter = this.position.subtract(circleCenter);
-    // let dist = toCenter.magnitude();
-    // let normal = toCenter.normalize();
-
-    // // 4. Check if near the loop
-    // let distanceFromCircle = Math.abs(dist - circleRadius);
-
-    // if (distanceFromCircle < 5) {
-    //   console.log("es");
-    //   // Tangent direction
-    //   let tangent = normal.rotate(-Math.PI / 2);
-
-    //   // Current speed along tangent
-    //   let tangentSpeed = this.velocity.dot(tangent);
-
-    //   // --- Loop condition ---
-    //   // Require enough speed to stay attached
-    //   let gravityStrength = gravity.y;
-    //   let verticalFactor = normal.y; // top = -1, bottom = 1
-
-    //   let minSpeed = Math.sqrt(
-    //     gravityStrength * circleRadius * Math.max(0, -verticalFactor),
-    //   );
-
-    //   if (Math.abs(tangentSpeed) > minSpeed) {
-    //     console.log("hmm");
-    //     // Stick to loop
-
-    //     // Keep only tangent motion
-    //     console.log(tangent.x, tangent.y, tangentSpeed);
-    //     let radialSpeed = this.velocity.dot(normal);
-
-    //     // Only correct if moving outward
-    //     if (radialSpeed > 0) {
-    //       this.velocity = this.velocity.subtract(normal.multiply(radialSpeed));
-    //     }
-
-    //     // Snap to circle
-    //     let correction = normal.multiply(circleRadius - dist);
-    //     this.position = this.position.add(correction);
-    //   }
-    //   // else: too slow → fall (do nothing)
-    // }
-
-    // this.position = this.position.add(this.velocity.multiply(delta));
-
-    this.velocity = this.velocity.subtract(gravity.multiply(delta));
-
-    let toCenter = this.position.subtract(circleCenter);
-    let centerDist = toCenter.magnitude();
-    let circleDist = Math.abs(centerDist - circleRadius);
-    let normal = toCenter.normalize();
-    let tangent = normal.rotate(-Math.PI / 2);
-
-    // radialSpeed is how much of the speed is following the circle
-
-    let radialSpeed = this.velocity.dot(tangent);
-
-    console.log(centerDist);
-    let minSpeed = Math.sqrt(gravity.y * circleRadius * Math.max(0, -normal.y));
-    if (radialSpeed >= minSpeed && circleDist < 20) {
-      let rotateAmount = (radialSpeed / circleRadius) * delta;
-
-      let originalAngle = normal.radian();
-
-      let newAngle = originalAngle + rotateAmount;
-
-      let rotateVector = Vector2D.vectorFromRadian(newAngle);
-
-      this.position = circleCenter.add(rotateVector.multiply(circleRadius));
-      this.velocity = this.velocity.rotate(rotateAmount);
-    } else {
-      this.position = this.position.subtract(this.velocity.multiply(delta));
+    switch (this.state) {
+      case "STUCK":
+        this.handleStuck(delta);
+        break;
+      case "FREE":
+        this.handleFree(delta);
     }
 
     // 5. Update sprite
-    this.sprite.x = this.position.x - 40;
-    this.sprite.y = this.position.y - 40;
+    let screenPosition = toScreenPosition(this.position);
+    this.sprite.x = screenPosition.x - 40;
+    this.sprite.y = screenPosition.y - 40;
 
-    // console.log(this.velocity);
-    // console.log(this.velocity.magnitude());
-    // console.log(acceleration);
+    console.log("Energy " + this.calculateEnergy());
+    console.log("State " + this.state);
+  }
+
+  handleStuck(delta) {
+    let toCenter = this.position.subtract(circleCenter);
+    let normal = toCenter.normalize();
+    let tangent = normal.rotate(Math.PI / 2);
+    let radialSpeed = this.velocity.dot(tangent);
+
+    let minSpeed = Math.sqrt(circleRadius * Math.max(0, normal.y * -gravity.y));
+
+    if (Math.abs(radialSpeed) >= minSpeed) {
+      let rotateAmount = (radialSpeed / circleRadius) * delta;
+      let originalAngle = normal.radian();
+      let newAngle = originalAngle + rotateAmount;
+      let rotateVector = Vector2D.vectorFromRadian(newAngle);
+      let newPosition = circleCenter.add(rotateVector.multiply(circleRadius));
+
+      // Energy conservation: KE + PE = const
+      // 0.5*v² + g*y = 0.5*v0² + g*y0
+      let dy = newPosition.y - this.position.y;
+      let speedSq = this.velocity.magnitudeSquared() + 2 * gravity.y * dy;
+      // (gravity.y is negative, dy positive when going up → speed decreases)
+      let newSpeed = Math.sqrt(Math.max(0, speedSq));
+
+      this.position = newPosition;
+      let newTangent = rotateVector.rotate(Math.PI / 2);
+      this.velocity = newTangent.multiply(Math.sign(radialSpeed) * newSpeed);
+    } else {
+      this.state = "FREE";
+      this.handleFree(delta);
+    }
+  }
+
+  detectCollision(delta) {
+    let movement = this.velocity.multiply(delta);
+
+    let toCenter = this.position.subtract(circleCenter);
+
+    let newPosition = this.position.add(movement);
+    let toCenterNew = newPosition.subtract(circleCenter);
+
+    // check if already colliding
+    if (toCenter.magnitude() >= circleRadius + 1) {
+      console.log("EMERGENCY SNAP", toCenter.magnitude() - circleRadius);
+      return 0;
+    }
+
+    // Check if collision with some margin
+    if (toCenterNew.magnitude() <= circleRadius + 1) {
+      return null;
+    }
+
+    let a = movement.magnitudeSquared();
+    let b = 2 * toCenter.dot(movement);
+    let c = toCenter.magnitudeSquared() - circleRadius ** 2;
+    let discriminant = b ** 2 - 4 * a * c;
+    if (discriminant >= 0) {
+      console.log("Collision detected");
+      let sqrtDisc = Math.sqrt(discriminant);
+      let t1 = (-b - sqrtDisc) / (2 * a);
+      let t2 = (-b + sqrtDisc) / (2 * a);
+
+      console.log(t1, t2);
+
+      let aboveZero = [t1, t2].filter((t) => t >= 0);
+      if (aboveZero.length === 0) {
+        return null;
+      }
+      let collisionTime = Math.min(...aboveZero);
+      console.log(collisionTime, delta);
+      if (collisionTime > delta) {
+        return null;
+      }
+      return collisionTime;
+    }
+    return null;
+  }
+
+  handleFree(delta) {
+    let originalVelocity = this.velocity;
+    this.velocity = this.velocity.add(gravity.multiply(delta / 2));
+
+    let collisionTime = this.detectCollision(delta);
+    if (collisionTime !== null) {
+      this.velocity = originalVelocity;
+      this.velocity = this.velocity.add(gravity.multiply(collisionTime / 2));
+      // Finish the first half-step up to collision time only
+      this.position = this.position.add(this.velocity.multiply(collisionTime));
+      // Apply the gravity owed for the first segment before handing off
+      this.velocity = this.velocity.add(gravity.multiply(collisionTime / 2));
+      this.handleCollision(delta - collisionTime);
+      return; // don't apply the trailing half-step
+    }
+
+    this.position = this.position.add(this.velocity.multiply(delta));
+    this.velocity = this.velocity.add(gravity.multiply(delta / 2));
+  }
+
+  handleCollision(remainingDelta) {
+    let toCenter = this.position.subtract(circleCenter);
+    let normal = toCenter.normalize();
+
+    // Reflect velocity
+    let normalSpeed = normal.multiply(this.velocity.dot(normal));
+    let tangentVel = this.velocity.subtract(normalSpeed);
+    this.velocity = tangentVel.subtract(normalSpeed);
+
+    // Check if it should stick
+    let minSpeed = Math.sqrt(circleRadius * Math.max(0, normal.y * -gravity.y));
+    if (tangentVel.magnitude() >= minSpeed) {
+      this.state = "STUCK";
+      if (remainingDelta) {
+        this.handleStuck(remainingDelta);
+      }
+    } else {
+      this.state = "FREE";
+      // Use remaining time to keep moving after bounce
+      if (remainingDelta) {
+        this.handleFree(remainingDelta);
+      }
+    }
+  }
+
+  calculateEnergy() {
+    let kinetic = 0.5 * this.velocity.magnitude() ** 2;
+    let potential = -gravity.y * this.position.y;
+    return kinetic + potential;
   }
 }
 
@@ -142,13 +194,13 @@ class Fish {
 const fish = new Fish(app, "images/pelle_nerd.png");
 let elapsed = 0.0;
 
-// app.ticker.add((delta) => {
-//   elapsed += delta;
-//   fish.tick(delta);
-// });
-
-document.addEventListener("keydown", function (event) {
-  if (event.code === "Space") {
-    fish.tick(1);
-  }
+app.ticker.add((delta) => {
+  elapsed += delta;
+  fish.tick(delta);
 });
+
+// document.addEventListener("keydown", function (event) {
+//   if (event.code === "KeyT") {
+//     fish.tick(1);
+//   }
+// });
